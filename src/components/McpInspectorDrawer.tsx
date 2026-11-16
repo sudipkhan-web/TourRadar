@@ -32,6 +32,16 @@ export function McpInspectorDrawer({
         partner_id: theme.id,
         channel: theme.channelType,
       },
+      ...(bookedTour?.agentPaymentAuthorization
+        ? {
+            payment_authorization: {
+              protocol: bookedTour.agentPaymentAuthorization.protocol,
+              verifiable_intent_token: bookedTour.agentPaymentAuthorization.verifiableIntentToken,
+              consent_scope: bookedTour.agentPaymentAuthorization.consentScope,
+              sca_method: bookedTour.agentPaymentAuthorization.scaMethod,
+            },
+          }
+        : {}),
     },
     _meta: {
       response_status: mcpState.responseSummary.status,
@@ -161,6 +171,17 @@ export function McpInspectorDrawer({
                     <dt className="text-slate-400">Merchant of Record &amp; Operator Settlement</dt>
                     <dd className="text-right font-medium text-slate-200">
                       Handled 100% by TourRadar
+                    </dd>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 py-2">
+                    <dt className="text-slate-400">Payment Authorization Rail</dt>
+                    <dd className="text-right font-medium text-slate-200">
+                      {bookedTour?.agentPaymentAuthorization
+                        ? `${bookedTour.agentPaymentAuthorization.protocol} · tokenized`
+                        : theme.id === 'mastercard-agentpay'
+                          ? 'Mastercard Agent Pay · tokenized, per-transaction consent'
+                          : 'Stored credential / loyalty balance'}
                     </dd>
                   </div>
                 </dl>

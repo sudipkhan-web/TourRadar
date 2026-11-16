@@ -238,9 +238,9 @@ export function ConciergePanel({
                                   <p className="text-[11px] font-medium text-[#004977] tabular-nums">
                                     or {milesEquivalent} Venture miles
                                   </p>
-                                ) : theme.id === 'skyscanner' ? (
+                                ) : theme.id === 'mastercard-agentpay' ? (
                                   <p className="text-[11px] text-slate-500">
-                                    Operator direct · No OTA markup
+                                    Tokenized agent payment · Card number never shared
                                   </p>
                                 ) : (
                                   <p className="text-[11px] text-slate-500">

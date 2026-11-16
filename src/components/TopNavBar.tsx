@@ -1,4 +1,4 @@
-import { ChevronDown, Code2, Compass, CreditCard, Plane } from 'lucide-react';
+import { ChevronDown, Code2, Compass, CreditCard, ShieldCheck } from 'lucide-react';
 import { PARTNER_THEMES } from '../data/travelData';
 import { PartnerId, PartnerTheme } from '../types/travel';
 
@@ -17,11 +17,16 @@ export function TopNavBar({
   onToggleInspector,
   theme,
 }: TopNavBarProps) {
+  const appTitle =
+    partnerId === 'vayo'
+      ? 'Vayo AI Trip Manager — Powered by TourRadar MCP'
+      : `${theme.assistantName} — Powered by TourRadar MCP`;
+
   const PartnerIcon =
     partnerId === 'capital-one'
       ? CreditCard
-      : partnerId === 'skyscanner'
-        ? Plane
+      : partnerId === 'mastercard-agentpay'
+        ? ShieldCheck
         : Compass;
 
   return (
@@ -36,7 +41,7 @@ export function TopNavBar({
             <PartnerIcon className="h-4.5 w-4.5" />
           </div>
           <h1 className="truncate font-display text-base font-semibold tracking-tight text-slate-900 sm:text-lg">
-            Vayo AI Trip Manager — Powered by TourRadar MCP
+            {appTitle}
           </h1>
         </div>
 

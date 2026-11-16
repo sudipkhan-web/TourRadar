@@ -3,6 +3,7 @@ import {
   Calendar,
   CheckCircle2,
   CreditCard,
+  Fingerprint,
   Lock,
   ShieldCheck,
   Sparkles,
@@ -33,6 +34,7 @@ export function BookingModal({
   const [travelerPhone, setTravelerPhone] = useState('+1 (305) 555-0194');
   const [vayoUseCredit, setVayoUseCredit] = useState(true);
   const [capitalOneMode, setCapitalOneMode] = useState<'miles' | 'card'>('miles');
+  const [scaAuthorized, setScaAuthorized] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -47,10 +49,20 @@ export function BookingModal({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [tour, isSubmitting, onClose]);
 
+  useEffect(() => {
+    // Consent is per-transaction: a fresh tour (or closing/reopening the modal)
+    // must not carry over a prior authorization.
+    setScaAuthorized(false);
+  }, [tour]);
+
   if (!tour) return null;
 
   const milesRequired = tour.priceUsd * 100;
   const vayoFinalPrice = vayoUseCredit ? Math.max(0, tour.priceUsd - 75) : tour.priceUsd;
+  const isMastercardAgentPay = theme.id === 'mastercard-agentpay';
+  const verifiableIntentToken = `VIT-${tour.tourCode.replace(/[^A-Z0-9]/gi, '')}-${new Date().getTime().toString().slice(-4)}`;
+  const consentScope = `Single-use · Max $${tour.priceUsd.toLocaleString()} USD · Merchant category: Travel (TourRadar GmbH) · Expires in 10 min`;
+  const scaMethod = 'Biometric passkey (device-bound)';
 
   let paymentMethodSummary = '';
   let totalChargedLabel = '';
@@ -63,8 +75,8 @@ export function BookingModal({
       paymentMethodSummary = 'Capital One •••• 7710 (10x Miles)';
       totalChargedLabel = `$${tour.priceUsd.toLocaleString()} USD`;
     }
-  } else if (theme.id === 'skyscanner') {
-    paymentMethodSummary = 'Mastercard •••• 9104 · Price Freeze';
+  } else if (isMastercardAgentPay) {
+    paymentMethodSummary = `Mastercard Agent Pay · Verifiable Intent ${verifiableIntentToken}`;
     totalChargedLabel = `$${tour.priceUsd.toLocaleString()} USD`;
   } else {
     paymentMethodSummary = vayoUseCredit
@@ -73,8 +85,11 @@ export function BookingModal({
     totalChargedLabel = `$${vayoFinalPrice.toLocaleString()} USD`;
   }
 
+  const canSubmit = !isMastercardAgentPay || scaAuthorized;
+
   const handleConfirm = (e: FormEvent) => {
     e.preventDefault();
+    if (!canSubmit) return;
     setIsSubmitting(true);
 
     setTimeout(() => {
@@ -91,6 +106,16 @@ export function BookingModal({
           hour: '2-digit',
           minute: '2-digit',
         }),
+        ...(isMastercardAgentPay
+          ? {
+              agentPaymentAuthorization: {
+                protocol: 'Mastercard Agent Pay',
+                verifiableIntentToken,
+                consentScope,
+                scaMethod,
+              },
+            }
+          : {}),
       });
       setIsSubmitting(false);
     }, 350);
@@ -290,21 +315,49 @@ export function BookingModal({
               </div>
             )}
 
-            {theme.id === 'skyscanner' && (
+            {isMastercardAgentPay && (
               <div className="space-y-2.5">
-                <div className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50/60 p-3">
-                  <div>
+                <div className="rounded-lg border border-orange-200 bg-orange-50/60 p-3">
+                  <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-slate-900">
-                      Skyscanner Express · Mastercard •••• 9104
+                      Verifiable Intent Token
                     </p>
-                    <p className="mt-0.5 text-xs text-slate-600">
-                      Protected by Skyscanner Price Freeze &amp; $0 OTA booking fees
-                    </p>
+                    <span className="font-mono text-xs font-semibold text-[#D14A20]">
+                      {verifiableIntentToken}
+                    </span>
                   </div>
-                  <span className="font-mono text-sm font-semibold text-[#0770E3] tabular-nums">
-                    ${tour.priceUsd.toLocaleString()}
-                  </span>
+                  <p className="mt-1 text-xs text-slate-600">{consentScope}</p>
+                  <p className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-500">
+                    <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden="true" />
+                    Card number never shared with TourRadar or the operator — Mastercard settles via
+                    a single-use token bound to this mandate.
+                  </p>
                 </div>
+
+                <label
+                  className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
+                    scaAuthorized
+                      ? 'border-[#D14A20] bg-orange-50/70'
+                      : 'border-slate-200 bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={scaAuthorized}
+                    onChange={(e) => setScaAuthorized(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded accent-[#D14A20]"
+                  />
+                  <span className="text-xs text-slate-700">
+                    <span className="flex items-center gap-1.5 font-semibold text-slate-900">
+                      <Fingerprint className="h-3.5 w-3.5 text-[#D14A20]" aria-hidden="true" />
+                      Authorize this agent-initiated payment
+                    </span>
+                    <span className="mt-0.5 block text-slate-600">
+                      Strong Customer Authentication via {scaMethod}. Scope limited to this single
+                      booking — the agent cannot reuse this mandate for another charge.
+                    </span>
+                  </span>
+                </label>
               </div>
             )}
 
@@ -372,7 +425,8 @@ export function BookingModal({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || !canSubmit}
+              title={!canSubmit ? 'Authorize the agent-initiated payment above to continue' : undefined}
               className={`inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition-colors focus:outline-none focus-visible:ring-2 ${theme.primaryBg} ${theme.primaryHoverBg} ${theme.ringFocus} disabled:opacity-70`}
             >
               {isSubmitting ? (

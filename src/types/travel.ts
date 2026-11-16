@@ -1,4 +1,4 @@
-export type PartnerId = 'vayo' | 'capital-one' | 'skyscanner';
+export type PartnerId = 'vayo' | 'capital-one' | 'mastercard-agentpay';
 
 export interface PartnerTheme {
   id: PartnerId;
@@ -71,6 +71,13 @@ export interface BookedTourConfirmation {
   totalChargedLabel: string;
   partnerId: PartnerId;
   bookedAt: string;
+  /** Present only for agent-initiated, tokenized payment authorizations (e.g. Mastercard Agent Pay). */
+  agentPaymentAuthorization?: {
+    protocol: string;
+    verifiableIntentToken: string;
+    consentScope: string;
+    scaMethod: string;
+  };
 }
 
 export interface McpToolCallState {
