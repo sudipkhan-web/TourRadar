@@ -1,0 +1,87 @@
+export type PartnerId = 'vayo' | 'capital-one' | 'skyscanner';
+
+export interface PartnerTheme {
+  id: PartnerId;
+  label: string;
+  shortName: string;
+  assistantName: string;
+  channelType: string;
+  primaryBg: string;
+  primaryHoverBg: string;
+  primaryText: string;
+  accentSurface: string;
+  accentBorder: string;
+  accentText: string;
+  ringFocus: string;
+  checkoutTitle: string;
+  paymentBadgeText: string;
+}
+
+export interface FlightSegment {
+  id: string;
+  date: string;
+  flightNumber: string;
+  airline: string;
+  originCity: string;
+  originCode: string;
+  destinationCity: string;
+  destinationCode: string;
+  departureTime: string;
+  arrivalTime: string;
+  status: 'Confirmed';
+  confirmationCode: string;
+}
+
+export interface TourPackage {
+  id: string;
+  tourCode: string;
+  title: string;
+  operator: string;
+  rating: number;
+  reviewCount: number;
+  style: 'Hiking & Trekking' | 'Cultural & Classic' | 'Comfort & Luxury';
+  priceUsd: number;
+  durationDays: number;
+  departureDate: string;
+  departureStatus: string;
+  startCity: string;
+  endCity: string;
+  imageUrl: string;
+  imageAlt: string;
+  highlights: string[];
+  inclusionsSummary: string;
+  groupSizeMax: number;
+}
+
+export interface ChatMessage {
+  id: string;
+  sender: 'assistant' | 'user';
+  text: string;
+  timestamp: string;
+  tours?: TourPackage[];
+  isEmptyFilterResult?: boolean;
+}
+
+export interface BookedTourConfirmation {
+  bookingReference: string;
+  tour: TourPackage;
+  travelerName: string;
+  travelerEmail: string;
+  paymentMethodSummary: string;
+  totalChargedLabel: string;
+  partnerId: PartnerId;
+  bookedAt: string;
+}
+
+export interface McpToolCallState {
+  method: 'tools/call';
+  toolName: 'tourradar.search_tours' | 'tourradar.create_booking';
+  arguments: Record<string, unknown>;
+  responseSummary: {
+    status: string;
+    latencyMs: number;
+    resultsCount?: number;
+    bookingReference?: string;
+    merchantOfRecord: string;
+  };
+}

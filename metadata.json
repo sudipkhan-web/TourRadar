@@ -1,0 +1,6 @@
+{
+  "name": "Vayo AI Trip Manager — Powered by TourRadar MCP",
+  "description": "Agentic Travel Commerce demo integrating Vayo AI Concierge with TourRadar's Model Context Protocol (MCP) server for multi-day tour discovery and instant booking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
