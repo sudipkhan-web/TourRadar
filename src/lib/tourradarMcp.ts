@@ -33,7 +33,17 @@ export interface LiveSearchResult {
   toolName: string;
   rawRequest: unknown;
   rawResponse: unknown;
+  /**
+   * 'tours': the response contained structured, tour-shaped objects we could
+   * map into the app's tour cards.
+   * 'text': the response was genuinely live but came back as free-form text
+   * (common for MCP tools, which typically answer conversationally rather
+   * than with a fixed JSON schema) -- still a real round-trip, just shown
+   * as the assistant's reply text instead of tour cards.
+   */
+  kind: 'tours' | 'text';
   tours: TourPackage[];
+  text?: string;
 }
 
 export interface FallbackResult {
@@ -137,6 +147,27 @@ function buildSearchArguments(tool: McpTool, query: string): Record<string, unkn
   return args;
 }
 
+/** Pull out any MCP text-content blocks (the common shape: {content: [{type: 'text', text: '...'}]}). */
+function extractTextBlocks(value: unknown): string[] {
+  const texts: string[] = [];
+  if (value && typeof value === 'object' && 'content' in (value as Record<string, unknown>)) {
+    const content = (value as Record<string, unknown>).content;
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (
+          block &&
+          typeof block === 'object' &&
+          (block as Record<string, unknown>).type === 'text' &&
+          typeof (block as Record<string, unknown>).text === 'string'
+        ) {
+          texts.push((block as Record<string, unknown>).text as string);
+        }
+      }
+    }
+  }
+  return texts;
+}
+
 /** Walk an arbitrary JSON value looking for an array of tour-shaped objects. */
 function extractToursFromResponse(value: unknown): Partial<TourPackage>[] {
   const candidates: Partial<TourPackage>[] = [];
@@ -210,18 +241,39 @@ export async function liveSearchTours(query: string): Promise<LiveSearchResult> 
     throw new Error(callResp.error.message ?? 'tools/call error');
   }
 
-  const candidates = extractToursFromResponse(callResp.result);
-  const tours = candidates.slice(0, 6).map((c, i) => normalizeTour(c, i));
+  const result = callResp.result;
 
-  if (tours.length === 0) {
-    throw new Error('Live TourRadar MCP call returned no recognizable tour data');
+  // 1. Look for structured tour-shaped objects directly in the result.
+  let candidates = extractToursFromResponse(result);
+
+  // 2. MCP tools conventionally answer with text-content blocks. If the result
+  // itself wasn't structured, check whether any text block is itself a JSON
+  // string containing tour-shaped data.
+  const textBlocks = extractTextBlocks(result);
+  if (candidates.length === 0) {
+    for (const block of textBlocks) {
+      try {
+        candidates = extractToursFromResponse(JSON.parse(block));
+      } catch {
+        // Not JSON -- plain conversational text, handled below.
+      }
+      if (candidates.length > 0) break;
+    }
   }
 
-  return {
-    source: 'live',
-    toolName: tool.name,
-    rawRequest,
-    rawResponse: callResp.result,
-    tours,
-  };
+  if (candidates.length > 0) {
+    const tours = candidates.slice(0, 6).map((c, i) => normalizeTour(c, i));
+    return { source: 'live', kind: 'tours', toolName: tool.name, rawRequest, rawResponse: result, tours };
+  }
+
+  // 3. No structured data, but a genuine free-form text answer from
+  // TourRadar's real server is still a real live result -- just shown as
+  // the assistant's reply text instead of tour cards.
+  const joinedText = textBlocks.join('\n\n').trim();
+  if (joinedText.length > 0) {
+    return { source: 'live', kind: 'text', toolName: tool.name, rawRequest, rawResponse: result, tours: [], text: joinedText };
+  }
+
+  const preview = JSON.stringify(result).slice(0, 300);
+  throw new Error(`Live TourRadar MCP call returned no recognizable content. Raw result preview: ${preview}`);
 }

@@ -80,9 +80,12 @@ export default function App() {
       const assistantMsg: ChatMessage = {
         id: `msg-ai-${Date.now() + 1}`,
         sender: 'assistant',
-        text: `Live result from TourRadar's real MCP server (tool: ${live.toolName}):`,
+        text:
+          live.kind === 'tours'
+            ? `Live result from TourRadar's real MCP server (tool: ${live.toolName}):`
+            : (live.text ?? ''),
         timestamp: nowTime,
-        tours: live.tours,
+        tours: live.kind === 'tours' ? live.tours : undefined,
         isEmptyFilterResult: false,
       };
       setMessages((prev) => [...prev, assistantMsg]);
@@ -93,7 +96,7 @@ export default function App() {
         responseSummary: {
           status: '200 OK (live)',
           latencyMs: Math.round(performance.now() - startedAt),
-          resultsCount: live.tours.length,
+          resultsCount: live.kind === 'tours' ? live.tours.length : undefined,
           merchantOfRecord: 'TourRadar GmbH',
         },
         source: 'live',
