@@ -119,29 +119,66 @@ async function discoverSearchTool(): Promise<McpTool> {
   }
 
   const tools = listResp.result?.tools ?? [];
-  const searchTool = tools.find((t) =>
-    /search|find|discover/i.test(t.name) && /tour|trip|adventure/i.test(`${t.name} ${t.description ?? ''}`),
-  );
+  const searchable = tools.filter((t) => /search|find|discover|list/i.test(t.name));
 
-  if (!searchTool) {
-    throw new Error('No matching search tool found in TourRadar MCP tools/list');
+  if (searchable.length === 0) {
+    const names = tools.map((t) => t.name).join(', ') || '(no tools returned)';
+    throw new Error(`No search-like tool found in TourRadar MCP tools/list. Tools seen: ${names}`);
   }
 
-  return searchTool;
+  // Prefer tools that sound like they return actual tours/itineraries over
+  // pure reference/taxonomy lookups (cities, countries, currencies, etc.).
+  const score = (t: McpTool) => {
+    const haystack = `${t.name} ${t.description ?? ''}`;
+    let s = 0;
+    if (/tour|itinerary|trip|adventure|departure/i.test(haystack)) s += 2;
+    if (/cit(y|ies)|countr(y|ies)|currency|language/i.test(haystack)) s -= 1;
+    return s;
+  };
+
+  const best = [...searchable].sort((a, b) => score(b) - score(a))[0];
+  return best;
 }
 
-/** Best-effort mapping of our known filter concepts onto whatever input schema the live tool declares. */
+interface JsonSchemaProp {
+  type?: string;
+  enum?: string[];
+  items?: { enum?: string[]; type?: string };
+}
+
+/**
+ * Schema-aware mapping of our known filter concepts onto whatever input
+ * schema the live tool actually declares. Learned from a real validation
+ * error returned by TourRadar's own server (MCP error -32602) against the
+ * `b2b-cities-search` tool: a `search` property that wants an array of
+ * keywords (not a sentence), and a required `country_code` property that
+ * must be one of a fixed list of ISO alpha-2 codes, also as an array.
+ * This demo's whole scenario is a Lima-to-Cusco (Peru) itinerary, so "PE"
+ * is a genuinely correct value here, not a guess.
+ */
 function buildSearchArguments(tool: McpTool, query: string): Record<string, unknown> {
-  const props = tool.inputSchema?.properties ?? {};
-  const keys = Object.keys(props);
+  const props = (tool.inputSchema?.properties ?? {}) as Record<string, JsonSchemaProp>;
   const args: Record<string, unknown> = {};
 
-  const queryKey = keys.find((k) => /query|q$|text|keyword|search/i.test(k));
-  if (queryKey) {
-    args[queryKey] = query;
-  } else if (keys.length > 0) {
-    // Fall back to the first string-looking property if no obvious query field exists.
-    args[keys[0]] = query;
+  for (const [key, schema] of Object.entries(props)) {
+    const isArrayType = schema.type === 'array';
+    const enumValues = schema.enum ?? schema.items?.enum;
+
+    if (/country/i.test(key) && enumValues) {
+      if (enumValues.includes('PE')) {
+        args[key] = isArrayType ? ['PE'] : 'PE';
+      }
+      continue;
+    }
+
+    if (/search|query|keyword|text/i.test(key)) {
+      if (isArrayType) {
+        const terms = query.toLowerCase().match(/[a-z]+/g) ?? [query];
+        args[key] = terms;
+      } else {
+        args[key] = query;
+      }
+    }
   }
 
   return args;
