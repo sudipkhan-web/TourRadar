@@ -180,6 +180,7 @@ export const INITIAL_MCP_STATE: McpToolCallState = {
     resultsCount: 3,
     merchantOfRecord: 'TourRadar GmbH',
   },
+  source: 'simulated',
 };
 
 export function evaluateChatFilter(rawQuery: string): {

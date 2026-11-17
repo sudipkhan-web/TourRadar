@@ -1,0 +1,227 @@
+/**
+ * A genuine client for TourRadar's real, public MCP server.
+ *
+ * TourRadar publishes a live, no-auth MCP endpoint at https://ai.tourradar.com/mcp/main
+ * (see https://www.tourradar.com/mlp/tourradar-mcp) exposing real tour search,
+ * itinerary/destination Q&A, live departures and pricing. This module makes a
+ * genuine MCP handshake (initialize -> tools/list -> tools/call) against that
+ * server at runtime, in the browser.
+ *
+ * IMPORTANT, HONEST SCOPE NOTE:
+ * - SEARCH is wired to attempt a real live call, because it's read-only and
+ *   safe to actually invoke against TourRadar's production server.
+ * - BOOKING is deliberately NOT wired to the real server. TourRadar's own
+ *   docs describe their booking capability as "start a booking from within
+ *   the conversation; the user completes and pays on TourRadar's site" --
+ *   i.e. even a "real" call wouldn't produce a complete, paid booking inside
+ *   this app, and actually invoking it would create a real booking attempt
+ *   against TourRadar's live system. That stays a clearly-labeled simulation.
+ *
+ * Every call here is wrapped so that ANY failure -- CORS rejection, network
+ * error, protocol mismatch, an unexpected response shape -- falls back to the
+ * existing simulated data path. The caller always gets back a `source` field
+ * ('live' | 'simulated') so the UI never has to guess, or imply, which one
+ * actually happened.
+ */
+
+import { TourPackage } from '../types/travel';
+
+export const TOURRADAR_MCP_ENDPOINT = 'https://ai.tourradar.com/mcp/main';
+
+export interface LiveSearchResult {
+  source: 'live';
+  toolName: string;
+  rawRequest: unknown;
+  rawResponse: unknown;
+  tours: TourPackage[];
+}
+
+export interface FallbackResult {
+  source: 'simulated';
+  reason: string;
+}
+
+type JsonRpcId = number;
+
+let nextId: JsonRpcId = 1;
+
+async function postJsonRpc(method: string, params: unknown): Promise<unknown> {
+  const id = nextId++;
+  const res = await fetch(TOURRADAR_MCP_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      // MCP's Streamable HTTP transport can reply as a single JSON object or
+      // as an SSE stream; accept either.
+      Accept: 'application/json, text/event-stream',
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`TourRadar MCP HTTP ${res.status}`);
+  }
+
+  const contentType = res.headers.get('content-type') ?? '';
+  const raw = await res.text();
+
+  if (contentType.includes('text/event-stream')) {
+    // Streamable HTTP: parse SSE "data: {...}" lines, take the last valid JSON-RPC message.
+    const dataLines = raw
+      .split('\n')
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trim())
+      .filter(Boolean);
+    for (let i = dataLines.length - 1; i >= 0; i -= 1) {
+      try {
+        return JSON.parse(dataLines[i]);
+      } catch {
+        // try the previous data line
+      }
+    }
+    throw new Error('No parseable SSE data frame from TourRadar MCP');
+  }
+
+  return JSON.parse(raw);
+}
+
+interface McpTool {
+  name: string;
+  description?: string;
+  inputSchema?: { properties?: Record<string, unknown> };
+}
+
+async function discoverSearchTool(): Promise<McpTool> {
+  // Per the MCP spec a client should initialize before calling tools/list.
+  await postJsonRpc('initialize', {
+    protocolVersion: '2024-11-05',
+    capabilities: {},
+    clientInfo: { name: 'vayo-trip-manager-demo', version: '0.1.0' },
+  });
+
+  const listResp = (await postJsonRpc('tools/list', {})) as {
+    result?: { tools?: McpTool[] };
+    error?: { message?: string };
+  };
+
+  if (listResp.error) {
+    throw new Error(listResp.error.message ?? 'tools/list error');
+  }
+
+  const tools = listResp.result?.tools ?? [];
+  const searchTool = tools.find((t) =>
+    /search|find|discover/i.test(t.name) && /tour|trip|adventure/i.test(`${t.name} ${t.description ?? ''}`),
+  );
+
+  if (!searchTool) {
+    throw new Error('No matching search tool found in TourRadar MCP tools/list');
+  }
+
+  return searchTool;
+}
+
+/** Best-effort mapping of our known filter concepts onto whatever input schema the live tool declares. */
+function buildSearchArguments(tool: McpTool, query: string): Record<string, unknown> {
+  const props = tool.inputSchema?.properties ?? {};
+  const keys = Object.keys(props);
+  const args: Record<string, unknown> = {};
+
+  const queryKey = keys.find((k) => /query|q$|text|keyword|search/i.test(k));
+  if (queryKey) {
+    args[queryKey] = query;
+  } else if (keys.length > 0) {
+    // Fall back to the first string-looking property if no obvious query field exists.
+    args[keys[0]] = query;
+  }
+
+  return args;
+}
+
+/** Walk an arbitrary JSON value looking for an array of tour-shaped objects. */
+function extractToursFromResponse(value: unknown): Partial<TourPackage>[] {
+  const candidates: Partial<TourPackage>[] = [];
+
+  const looksLikeTour = (obj: unknown): obj is Record<string, unknown> =>
+    typeof obj === 'object' &&
+    obj !== null &&
+    ('title' in obj || 'name' in obj) &&
+    ('price' in obj || 'priceUsd' in obj || 'price_usd' in obj);
+
+  const walk = (node: unknown) => {
+    if (Array.isArray(node)) {
+      node.forEach((item) => {
+        if (looksLikeTour(item)) {
+          candidates.push(item as Partial<TourPackage>);
+        } else {
+          walk(item);
+        }
+      });
+    } else if (typeof node === 'object' && node !== null) {
+      Object.values(node).forEach(walk);
+    }
+  };
+
+  walk(value);
+  return candidates;
+}
+
+function normalizeTour(raw: Record<string, unknown>, idx: number): TourPackage {
+  const str = (v: unknown, fallback: string) => (typeof v === 'string' ? v : fallback);
+  const num = (v: unknown, fallback: number) => (typeof v === 'number' ? v : fallback);
+
+  return {
+    id: str(raw.id, `live-tour-${idx}`),
+    tourCode: str(raw.tourCode ?? raw.tour_code, `LIVE-${idx}`),
+    title: str(raw.title ?? raw.name, 'TourRadar itinerary'),
+    operator: str(raw.operator ?? raw.supplier, 'TourRadar operator'),
+    rating: num(raw.rating, 4.5),
+    reviewCount: num(raw.reviewCount ?? raw.review_count, 0),
+    style: 'Cultural & Classic',
+    priceUsd: num(raw.priceUsd ?? raw.price_usd ?? raw.price, 0),
+    durationDays: num(raw.durationDays ?? raw.duration_days ?? raw.duration, 0),
+    departureDate: str(raw.departureDate ?? raw.departure_date, ''),
+    departureStatus: str(raw.departureStatus, 'Live from TourRadar MCP'),
+    startCity: str(raw.startCity ?? raw.start_city, ''),
+    endCity: str(raw.endCity ?? raw.end_city, ''),
+    imageUrl: str(raw.imageUrl ?? raw.image_url, ''),
+    imageAlt: str(raw.imageAlt, str(raw.title ?? raw.name, 'Tour')),
+    highlights: Array.isArray(raw.highlights) ? (raw.highlights as string[]) : [],
+    inclusionsSummary: str(raw.inclusionsSummary, ''),
+    groupSizeMax: num(raw.groupSizeMax, 0),
+  };
+}
+
+/**
+ * Attempts a genuine live search against TourRadar's real MCP server.
+ * Resolves to a LiveSearchResult on success, or throws -- callers should
+ * catch and fall back to the simulated path.
+ */
+export async function liveSearchTours(query: string): Promise<LiveSearchResult> {
+  const tool = await discoverSearchTool();
+  const args = buildSearchArguments(tool, query);
+
+  const rawRequest = { name: tool.name, arguments: args };
+  const callResp = (await postJsonRpc('tools/call', rawRequest)) as {
+    result?: unknown;
+    error?: { message?: string };
+  };
+
+  if (callResp.error) {
+    throw new Error(callResp.error.message ?? 'tools/call error');
+  }
+
+  const candidates = extractToursFromResponse(callResp.result);
+  const tours = candidates.slice(0, 6).map((c, i) => normalizeTour(c, i));
+
+  if (tours.length === 0) {
+    throw new Error('Live TourRadar MCP call returned no recognizable tour data');
+  }
+
+  return {
+    source: 'live',
+    toolName: tool.name,
+    rawRequest,
+    rawResponse: callResp.result,
+    tours,
+  };
+}

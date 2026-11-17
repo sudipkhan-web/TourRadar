@@ -20,9 +20,13 @@ Toggle **"Show MCP / API Inspector"** in the header to see, per channel:
 
 ## What this is — and isn't
 
-This is a **scripted simulation**, not a live LLM integration. The concierge's responses come from keyword-based filtering (`src/data/travelData.ts`), not a model call — despite the `@google/genai` dependency carried over from the AI Studio scaffold, nothing in this code actually calls Gemini. The MCP tool calls, booking confirmations, and payment-authorization tokens are all realistic mock data, not live API responses against TourRadar's real server.
+**Search now attempts a genuine live call to TourRadar's real, public MCP server** at `https://ai.tourradar.com/mcp/main` (no auth required — see [TourRadar's own MCP docs](https://www.tourradar.com/mlp/tourradar-mcp)). `src/lib/tourradarMcp.ts` does a real MCP handshake — `initialize` → `tools/list` → `tools/call` — directly from the browser, and maps whatever comes back into the app's tour cards.
 
-What it's useful for: a concrete, inspectable model of how three different partnership structures (consumer AI agent, bank loyalty, tokenized agent payments) could plug into the same MCP-based discovery-and-booking flow, and what each implies for settlement, consent, and revenue share.
+That live attempt can fail for reasons outside this app's control (CORS, network restrictions, a response shape this code didn't anticipate). **Every failure falls back automatically to the scripted simulation**, and the MCP Inspector always shows which one actually happened — a green "● LIVE" badge for a genuine round-trip to TourRadar's server, or an amber "○ SIMULATED" badge (with the specific fallback reason) otherwise. This was built and tested in a sandboxed environment that cannot reach `ai.tourradar.com` at all, so the fallback path is confirmed working; the live-success path is written to TourRadar's own published protocol but needs a real network to confirm.
+
+**Booking stays a deliberate simulation, by design, not as a fallback.** TourRadar's own docs describe their booking capability as starting a request that the traveler completes and pays for on tourradar.com — so even a "real" call wouldn't produce a complete booking inside this app, and actually invoking it would attempt a real action against TourRadar's live system, which isn't appropriate for a demo. The payment-authorization tokens, consent flow, and booking confirmations are realistic mock data. The concierge's chat replies also still come from keyword-based filtering (`src/data/travelData.ts`), not a model call — despite the `@google/genai` dependency carried over from the AI Studio scaffold, nothing here actually calls Gemini.
+
+What it's useful for: a concrete, inspectable model of how three different partnership structures (consumer AI agent, bank loyalty, tokenized agent payments) could plug into the same MCP-based discovery-and-booking flow — now partly backed by a real MCP round-trip for search — and what each implies for settlement, consent, and revenue share.
 
 ## Running it
 

@@ -86,6 +86,18 @@ export function McpInspectorDrawer({
             <span className="hidden text-xs text-slate-400 sm:inline">
               · Active Tool: <code className="font-mono text-emerald-300">{mcpState.toolName}</code>
             </span>
+            {mcpState.source === 'live' ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">
+                ● LIVE &mdash; real ai.tourradar.com/mcp/main response
+              </span>
+            ) : (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-300"
+                title={mcpState.fallbackReason}
+              >
+                ○ SIMULATED{mcpState.fallbackReason ? ' (fallback)' : ''}
+              </span>
+            )}
           </div>
 
           <button
@@ -194,6 +206,12 @@ export function McpInspectorDrawer({
                   TourRadar MCP
                 </span>
               </div>
+
+              {mcpState.fallbackReason ? (
+                <div className="mt-2 rounded-md border border-amber-900/50 bg-amber-950/30 p-2 text-[11px] text-amber-200">
+                  Fell back to simulated data: {mcpState.fallbackReason}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>

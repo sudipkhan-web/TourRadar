@@ -11,6 +11,7 @@ import {
   PARTNER_THEMES,
   TOURRADAR_TOURS,
 } from './data/travelData';
+import { liveSearchTours } from './lib/tourradarMcp';
 import {
   BookedTourConfirmation,
   ChatMessage,
@@ -54,7 +55,7 @@ export default function App() {
     setMcpState(INITIAL_MCP_STATE);
   };
 
-  const handleSendMessage = (userText: string) => {
+  const handleSendMessage = async (userText: string) => {
     const nowTime = new Date().toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
@@ -66,30 +67,68 @@ export default function App() {
       text: userText,
       timestamp: nowTime,
     };
+    setMessages((prev) => [...prev, userMsg]);
 
-    const { replyText, filteredTours, mcpArgs } = evaluateChatFilter(userText);
+    const startedAt = performance.now();
 
-    const assistantMsg: ChatMessage = {
-      id: `msg-ai-${Date.now() + 1}`,
-      sender: 'assistant',
-      text: replyText,
-      timestamp: nowTime,
-      tours: filteredTours.length > 0 ? filteredTours : undefined,
-      isEmptyFilterResult: filteredTours.length === 0,
-    };
+    // Try a genuine live call to TourRadar's real public MCP server first.
+    // Any failure (CORS, network, unexpected response shape, protocol
+    // mismatch) falls back to the scripted simulation below -- the UI is
+    // always told plainly which one actually happened via mcpState.source.
+    try {
+      const live = await liveSearchTours(userText);
+      const assistantMsg: ChatMessage = {
+        id: `msg-ai-${Date.now() + 1}`,
+        sender: 'assistant',
+        text: `Live result from TourRadar's real MCP server (tool: ${live.toolName}):`,
+        timestamp: nowTime,
+        tours: live.tours,
+        isEmptyFilterResult: false,
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+      setMcpState({
+        method: 'tools/call',
+        toolName: live.toolName,
+        arguments: (live.rawRequest as { arguments: Record<string, unknown> }).arguments,
+        responseSummary: {
+          status: '200 OK (live)',
+          latencyMs: Math.round(performance.now() - startedAt),
+          resultsCount: live.tours.length,
+          merchantOfRecord: 'TourRadar GmbH',
+        },
+        source: 'live',
+      });
+      return;
+    } catch (err) {
+      // Fall through to the simulated path below.
+      const fallbackReason = err instanceof Error ? err.message : 'Unknown error';
 
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
-    setMcpState({
-      method: 'tools/call',
-      toolName: 'tourradar.search_tours',
-      arguments: mcpArgs,
-      responseSummary: {
-        status: '200 OK',
-        latencyMs: 142,
-        resultsCount: filteredTours.length,
-        merchantOfRecord: 'TourRadar GmbH',
-      },
-    });
+      const { replyText, filteredTours, mcpArgs } = evaluateChatFilter(userText);
+
+      const assistantMsg: ChatMessage = {
+        id: `msg-ai-${Date.now() + 1}`,
+        sender: 'assistant',
+        text: replyText,
+        timestamp: nowTime,
+        tours: filteredTours.length > 0 ? filteredTours : undefined,
+        isEmptyFilterResult: filteredTours.length === 0,
+      };
+
+      setMessages((prev) => [...prev, assistantMsg]);
+      setMcpState({
+        method: 'tools/call',
+        toolName: 'tourradar.search_tours',
+        arguments: mcpArgs,
+        responseSummary: {
+          status: '200 OK (simulated fallback)',
+          latencyMs: 142,
+          resultsCount: filteredTours.length,
+          merchantOfRecord: 'TourRadar GmbH',
+        },
+        source: 'simulated',
+        fallbackReason,
+      });
+    }
   };
 
   const handleConfirmBooking = (confirmation: BookedTourConfirmation) => {
@@ -117,11 +156,16 @@ export default function App() {
         amount_usd: confirmation.tour.priceUsd,
       },
       responseSummary: {
-        status: '201 CREATED',
+        status: '201 CREATED (simulated)',
         latencyMs: 268,
         bookingReference: confirmation.bookingReference,
         merchantOfRecord: 'TourRadar GmbH',
       },
+      source: 'simulated',
+      fallbackReason:
+        'Booking is never sent to TourRadar’s live system from this demo -- their own MCP docs ' +
+        'describe booking as starting a request that the user completes and pays on tourradar.com, ' +
+        'so a real call here could not produce a complete booking anyway.',
     });
   };
 

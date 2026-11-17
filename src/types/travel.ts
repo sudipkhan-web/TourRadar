@@ -82,7 +82,7 @@ export interface BookedTourConfirmation {
 
 export interface McpToolCallState {
   method: 'tools/call';
-  toolName: 'tourradar.search_tours' | 'tourradar.create_booking';
+  toolName: string;
   arguments: Record<string, unknown>;
   responseSummary: {
     status: string;
@@ -91,4 +91,14 @@ export interface McpToolCallState {
     bookingReference?: string;
     merchantOfRecord: string;
   };
+  /**
+   * 'live': this call actually round-tripped to TourRadar's real public MCP
+   * server (https://ai.tourradar.com/mcp/main) and used its real response.
+   * 'simulated': scripted/mocked data -- either by design (booking, which is
+   * never fired against TourRadar's production system from this demo) or
+   * because a live search attempt failed and fell back.
+   */
+  source: 'live' | 'simulated';
+  /** Present only when source === 'simulated' because a live call failed. */
+  fallbackReason?: string;
 }
